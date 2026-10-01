@@ -24,7 +24,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 </style>
 </head>
 <body>
-<header><h1>Control de Compras y Rendiciones — v7 OCR</h1><small>Prioridad: cantidad, detalle, precio, descuento y total</small></header>
+<header><h1>Control de Compras y Rendiciones — v8 OCR</h1><small>Prioridad: cantidad, detalle, precio, descuento y total</small></header>
 <nav><button class="active" onclick="tab('inicio',this)">Inicio</button><button onclick="tab('registrar',this)">Registrar compra</button><button onclick="tab('rendiciones',this)">Rendiciones</button><button onclick="tab('compras',this)">Compras</button></nav>
 <main>
 <section id="inicio" class="tab active">
@@ -36,16 +36,16 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 <div class="card"><h2>1. Escanear QR</h2><div class="box"><div id="reader"></div><div class="actions"><button class="primary" onclick="scan()">Activar cámara QR</button><button class="secondary" onclick="stop()">Detener</button></div>
 <label>Contenido QR</label><textarea id="qr" rows="3"></textarea><div class="actions"><button class="secondary" onclick="parseQR()">Procesar QR</button></div><div id="qrmsg" class="muted"></div></div></div>
 
-<div class="card"><h2>2. Fotografiar factura</h2><div class="box"><input id="photo" type="file" accept="image/*" capture="environment"><div class="actions"><button class="primary" onclick="ocr()">Leer factura automáticamente</button></div><div class="progress"><div id="prog"></div></div><p id="ocrmsg" class="muted">El OCR analiza posición de texto para proveedor y tabla de productos.</p></div></div>
+<div class="card"><h2>2. Fotografiar factura</h2><div class="box"><input id="photo" type="file" accept="image/*" capture="environment"><div class="actions"><button class="primary" onclick="ocr()">Leer factura automáticamente</button><button class="secondary" onclick="ocrPrecision()">Leer detalle con precisión</button></div><div class="progress"><div id="prog"></div></div><p id="ocrmsg" class="muted">Prioridad: cantidad, descripción, precio, descuento y subtotal. Puede usar lectura automática o el modo precisión.</p></div></div>
 
 <div class="card"><h2>3. Revisar antes de guardar</h2>
 <form id="form"><div class="grid">
 <div><label>N° Rendición</label><input id="rend" readonly></div>
 <div><label>N° Factura *</label><input id="fact" required></div>
-<div><label>NIT proveedor *</label><input id="nit" required></div>
+<div><label>NIT proveedor *</label><input id="nit"></div>
 <div><label>CUF</label><input id="cuf"></div>
 <div><label>Proveedor / razón social *</label><input id="prov"></div>
-<div><label>Fecha *</label><input id="fecha" type="date" required></div>
+<div><label>Fecha *</label><input id="fecha" type="date"></div>
 <div><label>Hora</label><input id="hora" type="time"></div>
 <div><label>Total Bs *</label><input id="importe" type="number" step="0.01" required></div>
 <div><label>Categoría</label><select id="cat"><option>Materiales</option><option>Combustible</option><option>Transporte</option><option>Servicios</option><option>Oficina</option><option>Otros</option></select></div>
@@ -58,7 +58,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 <div><label>Precio unitario Bs</label><input id="pprecio" type="number" step="0.01" required></div>
 <div><label>Descuento Bs</label><input id="pdescuento" type="number" step="0.01"></div>
 <div><label>Subtotal Bs</label><input id="psubtotal" type="number" step="0.01" required></div>
-</div><p id="calcmsg" class="muted">El sistema comprobará: cantidad × precio − descuento = subtotal.</p></div><label>Observaciones</label><textarea id="obs"></textarea><div class="actions"><button class="primary">Guardar compra</button><button type="button" class="secondary" onclick="clearForm()">Limpiar</button></div></form>
+</div><p id="calcmsg" class="muted">El sistema comprobará: cantidad × precio − descuento = subtotal.</p><details><summary>Ver lectura OCR para revisar</summary><textarea id="ocrraw" rows="5" readonly></textarea></details></div><label>Observaciones</label><textarea id="obs"></textarea><div class="actions"><button class="primary">Guardar compra</button><button type="button" class="secondary" onclick="clearForm()">Limpiar</button></div></form>
 </div>
 
 <div class="card"><h3>Productos detectados</h3><div class="table"><table><thead><tr><th>Código</th><th>Descripción</th><th>Cant.</th><th>Unidad</th><th>P.Unit.</th><th>Desc.</th><th>Subtotal</th></tr></thead><tbody id="products"></tbody></table></div></div>
@@ -69,7 +69,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 </main>
 
 <script>
-const K="compras_bolivia_v5";let db=JSON.parse(localStorage.getItem(K)||"null")||{cash:7000,warn:60,limit:70,rend:[{id:1,date:new Date().toISOString().slice(0,10)}],p:[]};let qrScanner=null,products=[];const $=x=>document.getElementById(x);
+const K="compras_bolivia_v8";let db=JSON.parse(localStorage.getItem(K)||"null")||{cash:7000,warn:60,limit:70,rend:[{id:1,date:new Date().toISOString().slice(0,10)}],p:[]};let qrScanner=null,products=[];const $=x=>document.getElementById(x);
 function save(){localStorage.setItem(K,JSON.stringify(db));render()}
 function money(n){return "Bs "+Number(n||0).toLocaleString("es-BO",{minimumFractionDigits:2})}
 function tab(id,b){document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));$(id).classList.add("active");document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active")}
@@ -100,55 +100,95 @@ function providerFromHeader(txt){
  let m=joined.match(/(?:MONTERREY|IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA)[^\n]{0,100}?(?:S\.?R\.?L\.?|S\.?A\.?|LTDA\.?|SOLUCIONES EN ACERO)/i);
  if(m)return m[0].replace(/\s+/g," ").trim();return lines.find(x=>/(MONTERREY|IMPORTADORA|SOLUCIONES EN ACERO)/i.test(x))||"";
 }
+function normalizeOCRLine(s){return String(s||"").replace(/[|¦]/g," ").replace(/[“”]/g,'"').replace(/[’‘]/g,"'").replace(/[\u00a0]/g," ").replace(/\s+/g," ").trim()}
+function productMoneyTokens(s){
+ const out=[]; const re=/\b(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d{1,3})?\b/g; let m;
+ while((m=re.exec(s))){const n=num(m[0]);if(n!=null)out.push({raw:m[0],value:n,index:m.index});}
+ return out;
+}
 function parseProductCandidate(txt){
- let s=cleanOCR(txt);
- // Find code + quantity first. Then take the final three money-like values as
- // price, discount and subtotal. This survives OCR turning "PZ" into "|".
- let head=s.match(/([A-Z0-9][A-Z0-9._-]{3,})\s+(\d+(?:[.,]\d+)?)\s+/i);if(!head)return null;
- let codigo=head[1],cantidad=num(head[2]),rest=s.slice(head.index+head[0].length);
- let nums=[...rest.matchAll(/\d[\d.,]*/g)];if(nums.length<3)return null;
- let tri=nums.slice(-3),precio=num(tri[0][0]),descuento=num(tri[1][0]),subtotal=num(tri[2][0]);
- if(precio==null||descuento==null||subtotal==null)return null;
- let before=rest.slice(0,tri[0].index).trim();
- let unit="";let um=before.match(/(?:^|\s)(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV)\s*$/i);
- if(um){unit=um[1].toUpperCase();before=before.slice(0,um.index).trim()}
- before=before.replace(/^(?:Descripción|Und\.?|Prec\.?Unit|Descuento|SubTotal)\s+/i,"").trim();
- // If OCR inserted table headers before the row, keep only text after the last header.
- before=before.replace(/^.*?(?:Cod\.?\s*Prod\.?|Cantidad)\s+/i,"").trim();
- if(!before||cantidad==null)return null;
- return {codigo,cantidad,descripcion:before,unidad:unit||"PZ",precio,descuento,subtotal};
+ let s=normalizeOCRLine(txt); if(!s)return null;
+ // Remove common table headings but keep the actual product row.
+ s=s.replace(/\b(?:Cod\.?\s*Prod\.?|Código\s+de\s+Producto|Descripción|Cantidad|Und\.?|Prec\.?\s*Unit\.?|Descuento|SubTotal)\b/gi," ").replace(/\s+/g," ").trim();
+ // Find a plausible product code followed by quantity. OCR may insert a separator between them.
+ let head=s.match(/\b([A-Z]{2,}[A-Z0-9._-]{1,}|[A-Z0-9][A-Z0-9._-]{3,})\s*[^0-9A-Za-z]?\s*(\d+(?:[.,]\d+)?)\b/i);
+ let code="",cantidad=null,startPos=0;
+ if(head){code=head[1];cantidad=num(head[2]);startPos=head.index+head[0].length;}
+ else{
+   // Fallback: use the first plausible quantity and infer description/code later.
+   let q=s.match(/\b(\d+(?:[.,]\d+)?)\b/); if(!q)return null; cantidad=num(q[1]);startPos=q.index+q[0].length;
+ }
+ const rest=s.slice(startPos).trim(); const nums=productMoneyTokens(rest);
+ if(nums.length<3)return null;
+ const tri=nums.slice(-3), precio=tri[0].value, descuento=tri[1].value, subtotal=tri[2].value;
+ if(cantidad==null||precio==null||descuento==null||subtotal==null)return null;
+ let desc=rest.slice(0,tri[0].index).trim();
+ // Remove a leading OCR separator/unit. Unit may be missing in OCR, which is fine.
+ desc=desc.replace(/^[|¦|:\-]+\s*/,'').replace(/\b(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV)\s*$/i,'').trim();
+ desc=desc.replace(/\s{2,}/g,' ');
+ // Reject obvious non-product lines.
+ if(!desc || /^(SUBTOTAL|DESCUENTO|TOTAL|IMPORTE BASE|SON)\b/i.test(desc))return null;
+ let unidad=(rest.slice(0,tri[0].index).match(/\b(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV)\b/i)||[])[1]||"PZ";
+ return {codigo:code,cantidad,descripcion:desc,unidad:unidad.toUpperCase(),precio,descuento,subtotal,score:scoreProduct({cantidad,descripcion:desc,precio,descuento,subtotal})};
+}
+function scoreProduct(p){
+ let score=0; if(p.cantidad>0&&p.cantidad<100000)score+=2; if(p.precio>0)score+=2; if(p.subtotal>=0)score+=2; if(p.descripcion&&p.descripcion.length>=4)score+=3; if(Math.abs(p.cantidad*p.precio-p.descuento-p.subtotal)<0.02)score+=5; return score;
+}
+function pickBestProduct(texts){
+ let candidates=[]; for(const t of texts||[]){ if(!t)continue; for(const line of String(t).split(/\r?\n/)){const p=parseProductCandidate(line);if(p)candidates.push(p)} const p=parseProductCandidate(t);if(p)candidates.push(p); }
+ // Also scan merged OCR text line-by-line after replacing line breaks with spaces.
+ for(const t of texts||[]){const p=parseProductCandidate(String(t).replace(/\r?\n/g," "));if(p)candidates.push(p)}
+ candidates.sort((a,b)=>b.score-a.score); return candidates[0]||null;
 }
 function productsFromWords(words){
- if(!words||!words.length)return[];let rows=[];
- for(const w of words){let t=String(w.text||"").trim();if(!t)continue;let y=w.bbox.y0,row=rows.find(r=>Math.abs(r.y-y)<28);if(!row){row={y,items:[]};rows.push(row)}row.items.push(w)}
- rows.sort((a,b)=>a.y-b.y);for(const r of rows){r.items.sort((a,b)=>a.bbox.x0-b.bbox.x0);let p=parseProductCandidate(r.items.map(w=>w.text).join(" "));if(p)return[p]}return[];
+ if(!words||!words.length)return[]; let rows=[];
+ for(const w of words){let t=String(w.text||"").trim();if(!t)continue;let y=w.bbox.y0,row=rows.find(r=>Math.abs(r.y-y)<24);if(!row){row={y,items:[]};rows.push(row)}row.items.push(w)}
+ rows.sort((a,b)=>a.y-b.y); let out=[]; for(const r of rows){r.items.sort((a,b)=>a.bbox.x0-b.bbox.x0);const p=parseProductCandidate(r.items.map(w=>w.text).join(" "));if(p)out.push(p)} return out.sort((a,b)=>b.score-a.score);
 }
-function findTotal(lines){let vals=[];for(let i=0;i<lines.length;i++){if(/^TOTAL\s*(?:Bs)?/i.test(lines[i])){let m=lines[i].match(/([0-9][0-9.,]*)\s*$/);if(m)vals.push(num(m[1]));for(let j=1;j<=2;j++)if(lines[i+j]&&/^[0-9][0-9.,]*$/.test(lines[i+j]))vals.push(num(lines[i+j]))}}return vals.filter(v=>v!=null).at(-1)??null}
-async function cropImage(file,x,y,w,h){return await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.naturalWidth*w));c.height=Math.max(1,Math.round(img.naturalHeight*h));const ctx=c.getContext("2d");ctx.imageSmoothingEnabled=true;ctx.drawImage(img,Math.round(img.naturalWidth*x),Math.round(img.naturalHeight*y),Math.round(img.naturalWidth*w),Math.round(img.naturalHeight*h),0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c)};img.onerror=reject;img.src=url})}
-async function ocr(){
- let f=$("photo").files[0];if(!f){$("ocrmsg").textContent="Seleccione una fotografía.";return}
+function findTotal(lines){let vals=[];for(let i=0;i<lines.length;i++){if(/\bTOTAL\s*(?:Bs)?/i.test(lines[i])){let m=lines[i].match(/([0-9][0-9.,]*)\s*$/);if(m)vals.push(num(m[1]));for(let j=1;j<=2;j++)if(lines[i+j]&&/^[0-9][0-9.,]*$/.test(lines[i+j]))vals.push(num(lines[i+j]))}}return vals.filter(v=>v!=null).at(-1)??null}
+async function cropImage(file,x,y,w,h,scale=1.8){return await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.naturalWidth*w*scale));c.height=Math.max(1,Math.round(img.naturalHeight*h*scale));const ctx=c.getContext("2d");ctx.imageSmoothingEnabled=true;ctx.drawImage(img,Math.round(img.naturalWidth*x),Math.round(img.naturalHeight*y),Math.round(img.naturalWidth*w),Math.round(img.naturalHeight*h),0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c)};img.onerror=reject;img.src=url})}
+async function recognizeCrop(crop,psm){return await Tesseract.recognize(crop,"spa+eng",{logger:m=>{if(m.status==="recognizing text"&&m.progress!=null)$('prog').style.width=Math.min(96,Math.round(10+m.progress*80))+"%"},config:{tessedit_pageseg_mode:String(psm)}})}
+async function applyOCRResult(fullText,product){
+ const lines=String(fullText||"").split(/\r?\n/).map(x=>normalizeOCRLine(x)).filter(Boolean);
+ let pv=providerFromHeader(fullText);if(pv)$('prov').value=pv;
+ let fm=String(fullText).match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);if(fm&&!$('fact').value)$('fact').value=fm[1];
+ let dm=String(fullText).match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i);if(dm)$('fecha').value=dateISO(dm[1]);
+ let tm=String(fullText).match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);if(tm)$('hora').value=tm[0];
+ let tt=findTotal(lines);if(tt!=null)$('importe').value=tt.toFixed(2);
+ if(product){products=[product];$('pcodigo').value=product.codigo||"";$('pcantidad').value=product.cantidad;$('punidad').value=product.unidad||"PZ";$('pprecio').value=product.precio.toFixed(2);$('pdescuento').value=product.descuento.toFixed(2);$('psubtotal').value=product.subtotal.toFixed(2);$('desc').value=product.descripcion;$('importe').value=product.subtotal.toFixed(2);updateCalc();showProducts();return true}
+ showProducts();return false;
+}
+async function ocr(){return runOCR(false)}
+async function ocrPrecision(){return runOCR(true)}
+async function runOCR(precision){
+ let f=$('photo').files[0];if(!f){$('ocrmsg').textContent="Seleccione una fotografía.";return}
  try{
-  $("ocrmsg").textContent="1/4 Preparando lectura...";$("prog").style.width="10%";
-  const tableCrop=await cropImage(f,0.01,0.25,0.98,0.30),headerCrop=await cropImage(f,0,0,0.55,0.28);
-  $("ocrmsg").textContent="2/4 Leyendo cantidad, detalle, precio, descuento y subtotal...";$("prog").style.width="20%";
-  const tableOCR=await Tesseract.recognize(tableCrop,"spa+eng",{logger:m=>{if(m.status==="recognizing text")$("prog").style.width=Math.max(20,Math.round(20+(m.progress||0)*35))+"%";}});
-  $("prog").style.width="58%";const headerOCR=await Tesseract.recognize(headerCrop,"spa+eng");$("prog").style.width="68%";const full=await Tesseract.recognize(f,"spa+eng");
-  const fullText=full.data.text,lines=fullText.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
-  let pv=providerFromHeader(headerOCR.data.text);if(pv)$("prov").value=pv;
-  let fm=fullText.match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);if(fm&&!$("fact").value)$("fact").value=fm[1];
-  let dm=fullText.match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i);if(dm)$("fecha").value=dateISO(dm[1]);
-  let tm=fullText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);if(tm)$("hora").value=tm[0];
-  let tt=findTotal(lines);if(tt!=null)$("importe").value=tt.toFixed(2);
-  let p=parseProductCandidate(tableOCR.data.text)||parseProductCandidate(fullText)||productsFromWords(full.data.words)[0]||null;
-  if(p){products=[p];$("pcodigo").value=p.codigo;$("pcantidad").value=p.cantidad;$("punidad").value=p.unidad;$("pprecio").value=p.precio.toFixed(2);$("pdescuento").value=p.descuento.toFixed(2);$("psubtotal").value=p.subtotal.toFixed(2);$("desc").value=p.descripcion;$("importe").value=p.subtotal.toFixed(2);updateCalc();showProducts();$("ocrmsg").textContent="Lectura terminada. Cantidad, detalle, precio, descuento y subtotal detectados. Revise antes de guardar."}
-  else{$("ocrmsg").textContent="No se pudo identificar la línea de producto. Pruebe una foto frontal, completa y nítida.";products=[];showProducts()}
-  $("prog").style.width="100%";
- }catch(e){$("ocrmsg").textContent="Error de lectura: "+e.message}
+  $('ocrmsg').textContent=precision?"Modo precisión: localizando la tabla de productos...":"Preparando lectura...";$('prog').style.width="5%";
+  const full=await Tesseract.recognize(f,"spa+eng",{logger:m=>{if(m.status==="recognizing text"&&m.progress!=null)$('prog').style.width=Math.min(45,Math.round(5+m.progress*40))+"%"},config:{tessedit_pageseg_mode:"3"}});
+  const fullText=full.data.text; $('ocrraw').value=fullText;
+  const crops=[];
+  // Product table zones: broad, exact-row, and lower-table fallbacks. Multiple PSMs make OCR tolerant of phone photos.
+  crops.push(await cropImage(f,0.02,0.25,0.96,0.20,2.0));
+  crops.push(await cropImage(f,0.02,0.27,0.96,0.13,2.2));
+  crops.push(await cropImage(f,0.02,0.30,0.96,0.16,2.2));
+  if(precision)crops.push(await cropImage(f,0.02,0.23,0.96,0.24,2.0));
+  let texts=[fullText],product=null;
+  for(let i=0;i<crops.length&&!product;i++){
+    $('ocrmsg').textContent=`Leyendo tabla de productos (${i+1}/${crops.length})...`;
+    for(const psm of [6,3]){const r=await recognizeCrop(crops[i],psm);texts.push(r.data.text);product=pickBestProduct([r.data.text]);if(product)break;}
+  }
+  if(!product){const ws=productsFromWords(full.data.words||[]);product=ws[0]||pickBestProduct(texts)}
+  $('prog').style.width="95%";
+  const ok=await applyOCRResult(fullText,product);
+  $('prog').style.width="100%";
+  if(ok){$('ocrmsg').textContent="✓ Datos prioritarios detectados. Revise la línea y pulse Guardar compra."}
+  else{$('ocrmsg').textContent="No se encontró una línea de producto. Use una foto frontal, completa y bien enfocada; si hace falta, pulse 'Leer detalle con precisión'."}
+ }catch(e){$('ocrmsg').textContent="Error de lectura: "+e.message;$('prog').style.width="0%"}
 }
 function updateCalc(){let q=num($("pcantidad").value),pr=num($("pprecio").value),d=num($("pdescuento").value)||0,sub=num($("psubtotal").value);if(q!=null&&pr!=null){let calc=q*pr-d;$("calcmsg").textContent="Calculado: Bs "+calc.toFixed(2)+(sub!=null?" · Subtotal factura: Bs "+sub.toFixed(2)+" · Diferencia: Bs "+(calc-sub).toFixed(2):"")}}
 function showProducts(){$("products").innerHTML=products.map(p=>"<tr><td>"+p.codigo+"</td><td>"+p.descripcion+"</td><td>"+p.cantidad+"</td><td>"+p.unidad+"</td><td>"+money(p.precio)+"</td><td>"+money(p.descuento)+"</td><td>"+money(p.subtotal)+"</td></tr>").join("")||"<tr><td colspan=7>No se detectaron productos; pruebe una foto más nítida.</td></tr>"}
 ["pcantidad","pprecio","pdescuento","psubtotal"].forEach(id=>$(id).addEventListener("input",updateCalc));
-$("form").onsubmit=e=>{e.preventDefault();let p0={codigo:$("pcodigo").value,cantidad:num($("pcantidad").value),descripcion:$("desc").value,unidad:$("punidad").value,precio:num($("pprecio").value),descuento:num($("pdescuento").value)||0,subtotal:num($("psubtotal").value)};if(!p0.descripcion||p0.cantidad==null||p0.precio==null||p0.subtotal==null){alert("Faltan datos del producto: cantidad, descripción, precio o subtotal.");return}products=[p0];let p={rend:Number($("rend").value),fact:$("fact").value,nit:$("nit").value,cuf:$("cuf").value,prov:$("prov").value,fecha:$("fecha").value,hora:$("hora").value,total:Number($("importe").value),cat:$("cat").value,desc:$("desc").value,products};if(db.p.some(x=>x.fact==p.fact&&x.nit==p.nit)){alert("Posible factura duplicada.");return}db.p.push(p);save();alert("Compra guardada.");clearForm();tab("inicio",document.querySelector("nav button"))}
+$("form").onsubmit=e=>{e.preventDefault();let p0={codigo:$("pcodigo").value,cantidad:num($("pcantidad").value),descripcion:$("desc").value,unidad:$("punidad").value,precio:num($("pprecio").value),descuento:num($("pdescuento").value)||0,subtotal:num($("psubtotal").value)};if(!p0.descripcion||p0.cantidad==null||p0.precio==null||p0.subtotal==null){alert("Faltan datos prioritarios: cantidad, descripción, precio o subtotal.");return} let calc=p0.cantidad*p0.precio-(p0.descuento||0); if(Math.abs(calc-p0.subtotal)>0.02 && !confirm("El subtotal no coincide con cantidad × precio − descuento. ¿Desea guardar de todos modos?"))return; products=[p0];let p={rend:Number($("rend").value),fact:$("fact").value,nit:$("nit").value,cuf:$("cuf").value,prov:$("prov").value,fecha:$("fecha").value,hora:$("hora").value,total:Number($("importe").value),cat:$("cat").value,desc:$("desc").value,products};if(db.p.some(x=>x.fact==p.fact&&x.nit==p.nit)){alert("Posible factura duplicada.");return}db.p.push(p);save();alert("Compra guardada.");clearForm();tab("inicio",document.querySelector("nav button"))}
 function clearForm(){$("form").reset();$("rend").value=String(db.rend.at(-1).id).padStart(3,"0");products=[];showProducts();$("calcmsg").textContent="El sistema comprobará: cantidad × precio − descuento = subtotal."}
 function newRend(){db.rend.push({id:Math.max(...db.rend.map(x=>x.id))+1,date:new Date().toISOString().slice(0,10)});save()}
 render();clearForm()
