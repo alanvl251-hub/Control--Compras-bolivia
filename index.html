@@ -75,7 +75,7 @@ async function stop(){if(qrScanner){try{await qrScanner.stop()}catch(e){}try{qrS
 function num(s){if(s==null)return null;s=String(s).replace(/[^0-9,.-]/g,"");if(s.includes(",")&&s.includes(".")){if(s.lastIndexOf(",")>s.lastIndexOf("."))s=s.replace(/\./g,"").replace(",",".");else s=s.replace(/,/g,"")}else if(s.includes(",")){let a=s.split(",");s=a.length==2&&a[1].length<=2?a[0].replace(/\./g,"")+"."+a[1]:s.replace(/,/g,"")}return Number(s)}
 function dateISO(s){let m=String(s).match(/(\d{1,2})[\/. -](\d{1,2})[\/. -](\d{2,4})/);if(!m)return"";let y=m[3].length==2?"20"+m[3]:m[3];return y+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")}
 function provider(lines){
-let labels=/^(nombre\s*\/?\s*raz[oó]n\s*social|raz[oó]n\s*social|proveedor|emisor)\s*:?[ ]*$/i;
+let labels=/^(proveedor|emisor|raz[oó]n\s*social\s*del\s*emisor)\s*:?[ ]*$/i;
 for(let i=0;i<lines.length;i++)if(labels.test(lines[i]))for(let j=i+1;j<i+5&&j<lines.length;j++){let x=lines[j].trim();if(x.length>3&&!/^(NIT|CUF|FACTURA|FECHA|DIRECCI|TEL|ACTIVIDAD|CLIENTE)/i.test(x))return x}
 let c=lines.slice(0,20).find(x=>/(IMPORTADORA|INDUSTRIA|COMERCIAL|S\.A\.|S\.R\.L\.|LTDA)/i.test(x));return c||""}
 function table(words){
@@ -85,7 +85,108 @@ for(let r of rows){r.items.sort((a,b)=>a.bbox.x0-b.bbox.x0);let s=r.items.map(w=
 let m=s.match(/^([A-Z0-9][A-Z0-9._-]{3,})\s+([\d.,]+)\s+(.+?)\s+(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/i);
 if(m)out.push({codigo:m[1],cantidad:num(m[2]),descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:num(m[5]),descuento:num(m[6]),subtotal:num(m[7])})}return out}
 function total(lines){let a=[];lines.forEach((x,i)=>{if(/^total\b/i.test(x)){let m=x.match(/([0-9][0-9.,]*)\s*$/);if(m)a.push(num(m[1]));if(lines[i+1]&&/^[0-9.,]+$/.test(lines[i+1]))a.push(num(lines[i+1]))}});return a.filter(x=>x!=null).at(-1)}
-async function ocr(){let f=$("photo").files[0];if(!f){$("ocrmsg").textContent="Seleccione una fotografía.";return}try{$("ocrmsg").textContent="Analizando factura...";let r=await Tesseract.recognize(f,"spa+eng",{logger:m=>{if(m.status==="recognizing text")$("prog").style.width=Math.round((m.progress||0)*100)+"%"}}),lines=r.data.text.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);let pv=provider(lines),tt=total(lines);if(pv)$("prov").value=pv;let fm=r.data.text.match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);if(fm&&!$("fact").value)$("fact").value=fm[1];let dm=r.data.text.match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);if(dm)$("fecha").value=dateISO(dm[1]);let tm=r.data.text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);if(tm)$("hora").value=tm[0];if(tt!=null)$("importe").value=tt.toFixed(2);products=table(r.data.words);if(products.length)$("desc").value=products.map(x=>x.descripcion).join(" | ");showProducts();$("ocrmsg").textContent="Lectura terminada. Revise los datos antes de guardar."}catch(e){$("ocrmsg").textContent="Error de lectura: "+e.message}}
+async function cropImage(file, x, y, w, h){
+  return await new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const c=document.createElement("canvas");
+      c.width=Math.max(1,Math.round(img.naturalWidth*w));
+      c.height=Math.max(1,Math.round(img.naturalHeight*h));
+      c.getContext("2d").drawImage(img,
+        Math.round(img.naturalWidth*x),Math.round(img.naturalHeight*y),
+        Math.round(img.naturalWidth*w),Math.round(img.naturalHeight*h),
+        0,0,c.width,c.height);
+      URL.revokeObjectURL(url); resolve(c);
+    };
+    img.onerror=reject; img.src=url;
+  });
+}
+
+function providerFromHeader(txt){
+  const lines=txt.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+  // In the tested invoice the issuer is in the upper-left logo/header:
+  // "Monterrey IMPORTADORA ... SOLUCIONES EN ACERO".
+  // Never use the "Nombre/Razón Social" line here because that is the customer.
+  let joined=lines.join(" ");
+  let m=joined.match(/(?:IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA|MONTERREY)[^\\n]{0,100}(?:S\.?R\.?L\.?|S\.?A\.?|LTDA\.?)/i);
+  if(m) return m[0].replace(/\s+/g," ").trim();
+  let c=lines.find(x=>/(IMPORTADORA|COMERCIAL|MONTERREY|SOLUCIONES EN ACERO)/i.test(x));
+  return c||"";
+}
+
+function productsFromTableText(txt){
+  const lines=txt.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+  let out=[];
+  for(const s of lines){
+    let m=s.match(/([A-Z0-9][A-Z0-9._-]{3,})\s+([\d.,]+)\s+(.+?)\s+(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/i);
+    if(m){
+      out.push({codigo:m[1],cantidad:num(m[2]),descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:num(m[5]),descuento:num(m[6]),subtotal:num(m[7])});
+    }
+  }
+  return out;
+}
+
+async function ocr(){
+  let f=$("photo").files[0];
+  if(!f){$("ocrmsg").textContent="Seleccione una fotografía.";return}
+  try{
+    $("ocrmsg").textContent="1/3 Analizando encabezado del emisor...";
+    $("prog").style.width="15%";
+
+    // Targeted zones for standard Bolivian invoice layout.
+    // Upper-left: issuer/logo. Central band: customer/date. Middle band: product table.
+    const headerCrop=await cropImage(f,0.00,0.00,0.48,0.24);
+    const tableCrop=await cropImage(f,0.02,0.29,0.96,0.24);
+
+    const headerOCR=await Tesseract.recognize(headerCrop,"spa+eng");
+    $("prog").style.width="35%";
+    const tableOCR=await Tesseract.recognize(tableCrop,"spa+eng");
+    $("prog").style.width="60%";
+
+    const full=await Tesseract.recognize(f,"spa+eng",{logger:m=>{
+      if(m.status==="recognizing text")$("prog").style.width=Math.max(60,Math.round(60+(m.progress||0)*40))+"%";
+    }});
+
+    const fullText=full.data.text;
+    const lines=fullText.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+
+    // Supplier: use issuer header, not customer "Nombre/Razón Social".
+    let pv=providerFromHeader(headerOCR.data.text);
+    if(!pv){
+      pv=lines.find(x=>/(IMPORTADORA|MONTERREY|SOLUCIONES EN ACERO)/i.test(x))||"";
+    }
+    if(pv) $("prov").value=pv;
+
+    // Invoice number and date/time.
+    let fm=fullText.match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);
+    if(fm && !$("fact").value) $("fact").value=fm[1];
+    let dm=fullText.match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);
+    if(dm) $("fecha").value=dateISO(dm[1]);
+    let tm=fullText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+    if(tm) $("hora").value=tm[0];
+
+    // Total: prefer TOTAL Bs in the full invoice.
+    let tt=total(lines);
+    if(tt!=null) $("importe").value=tt.toFixed(2);
+
+    // Product table: first use OCR text of the dedicated table crop,
+    // then word-coordinate reconstruction, then a tolerant text fallback.
+    products=productsFromTableText(tableOCR.data.text);
+    if(!products.length) products=table(full.data.words);
+    if(!products.length) products=productsFromTableText(fullText);
+
+    if(products.length) $("desc").value=products.map(x=>x.descripcion).join(" | ");
+    showProducts();
+
+    $("prog").style.width="100%";
+    $("ocrmsg").textContent=products.length
+      ? "Lectura terminada. Se detectó proveedor y "+products.length+" línea(s) de producto. Revise antes de guardar."
+      : "Proveedor procesado. La tabla de productos no fue reconocida; pruebe una foto más nítida y frontal.";
+  }catch(e){
+    $("ocrmsg").textContent="Error de lectura: "+e.message;
+  }
+}
 function showProducts(){$("products").innerHTML=products.map(p=>"<tr><td>"+p.codigo+"</td><td>"+p.descripcion+"</td><td>"+p.cantidad+"</td><td>"+p.unidad+"</td><td>"+money(p.precio)+"</td><td>"+money(p.descuento)+"</td><td>"+money(p.subtotal)+"</td></tr>").join("")||"<tr><td colspan=7>No se detectaron productos; pruebe una foto más nítida.</td></tr>"}
 $("form").onsubmit=e=>{e.preventDefault();let p={rend:Number($("rend").value),fact:$("fact").value,nit:$("nit").value,cuf:$("cuf").value,prov:$("prov").value,fecha:$("fecha").value,hora:$("hora").value,total:Number($("importe").value),cat:$("cat").value,desc:$("desc").value,products};if(db.p.some(x=>x.fact==p.fact&&x.nit==p.nit)){alert("Posible factura duplicada.");return}db.p.push(p);save();alert("Compra guardada.");clearForm();tab("inicio",document.querySelector("nav button"))}
 function clearForm(){$("form").reset();$("rend").value=String(db.rend.at(-1).id).padStart(3,"0");products=[];showProducts()}
