@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>Control de Compras Bolivia v5 OCR</title>
+<title>Control de Compras Bolivia v7 OCR</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
@@ -24,7 +24,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 </style>
 </head>
 <body>
-<header><h1>Control de Compras y Rendiciones — v5 OCR</h1><small>QR + OCR estructurado para facturas bolivianas</small></header>
+<header><h1>Control de Compras y Rendiciones — v7 OCR</h1><small>Prioridad: cantidad, detalle, precio, descuento y total</small></header>
 <nav><button class="active" onclick="tab('inicio',this)">Inicio</button><button onclick="tab('registrar',this)">Registrar compra</button><button onclick="tab('rendiciones',this)">Rendiciones</button><button onclick="tab('compras',this)">Compras</button></nav>
 <main>
 <section id="inicio" class="tab active">
@@ -44,13 +44,21 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px;borde
 <div><label>N° Factura *</label><input id="fact" required></div>
 <div><label>NIT proveedor *</label><input id="nit" required></div>
 <div><label>CUF</label><input id="cuf"></div>
-<div><label>Proveedor / razón social *</label><input id="prov" required></div>
+<div><label>Proveedor / razón social *</label><input id="prov"></div>
 <div><label>Fecha *</label><input id="fecha" type="date" required></div>
 <div><label>Hora</label><input id="hora" type="time"></div>
 <div><label>Total Bs *</label><input id="importe" type="number" step="0.01" required></div>
 <div><label>Categoría</label><select id="cat"><option>Materiales</option><option>Combustible</option><option>Transporte</option><option>Servicios</option><option>Oficina</option><option>Otros</option></select></div>
-<div><label>Descripción</label><input id="desc"></div>
-</div><label>Observaciones</label><textarea id="obs"></textarea><div class="actions"><button class="primary">Guardar compra</button><button type="button" class="secondary" onclick="clearForm()">Limpiar</button></div></form>
+<div><label>Descripción / detalle</label><input id="desc"></div>
+</div>
+<div class="card" style="margin-top:12px;background:#f8fafc;border:2px solid #d5dde8"><h3 style="margin-top:0">Detalle de producto — datos prioritarios</h3><div class="grid">
+<div><label>Código producto</label><input id="pcodigo"></div>
+<div><label>Cantidad</label><input id="pcantidad" type="number" step="0.001" required></div>
+<div><label>Unidad</label><input id="punidad"></div>
+<div><label>Precio unitario Bs</label><input id="pprecio" type="number" step="0.01" required></div>
+<div><label>Descuento Bs</label><input id="pdescuento" type="number" step="0.01"></div>
+<div><label>Subtotal Bs</label><input id="psubtotal" type="number" step="0.01" required></div>
+</div><p id="calcmsg" class="muted">El sistema comprobará: cantidad × precio − descuento = subtotal.</p></div><label>Observaciones</label><textarea id="obs"></textarea><div class="actions"><button class="primary">Guardar compra</button><button type="button" class="secondary" onclick="clearForm()">Limpiar</button></div></form>
 </div>
 
 <div class="card"><h3>Productos detectados</h3><div class="table"><table><thead><tr><th>Código</th><th>Descripción</th><th>Cant.</th><th>Unidad</th><th>P.Unit.</th><th>Desc.</th><th>Subtotal</th></tr></thead><tbody id="products"></tbody></table></div></div>
@@ -72,124 +80,76 @@ $("rends").innerHTML=db.rend.map(x=>"<tr><td>Rendición "+String(x.id).padStart(
 function parseQR(){let s=$("qr").value.trim(),u;try{u=new URL(s);$("nit").value=u.searchParams.get("nit")||"";$("cuf").value=u.searchParams.get("cuf")||"";$("fact").value=u.searchParams.get("numero")||""}catch(e){}$("qrmsg").textContent="QR leído: NIT, CUF y número. Tome la foto para completar proveedor, importe y productos."}
 async function scan(){try{qrScanner=new Html5Qrcode("reader");await qrScanner.start({facingMode:"environment"},{fps:10,qrbox:250},s=>{$("qr").value=s;parseQR();stop()},()=>{})}catch(e){$("qrmsg").textContent="No se pudo abrir la cámara. Verifique HTTPS/permisos."}}
 async function stop(){if(qrScanner){try{await qrScanner.stop()}catch(e){}try{qrScanner.clear()}catch(e){}qrScanner=null}}
-function num(s){if(s==null)return null;s=String(s).replace(/[^0-9,.-]/g,"");if(s.includes(",")&&s.includes(".")){if(s.lastIndexOf(",")>s.lastIndexOf("."))s=s.replace(/\./g,"").replace(",",".");else s=s.replace(/,/g,"")}else if(s.includes(",")){let a=s.split(",");s=a.length==2&&a[1].length<=2?a[0].replace(/\./g,"")+"."+a[1]:s.replace(/,/g,"")}return Number(s)}
+function num(s){
+  if(s==null)return null;
+  s=String(s).trim().replace(/[^0-9,.-]/g,"");
+  if(!s)return null;
+  if(s.includes(",")&&s.includes(".")){
+    if(s.lastIndexOf(",")>s.lastIndexOf("."))s=s.replace(/\./g,"").replace(",",".");
+    else s=s.replace(/,/g,"");
+  }else if(s.includes(",")){
+    let a=s.split(",");
+    s=a.length==2&&a[1].length<=2?a[0].replace(/\./g,"")+"."+a[1]:s.replace(/,/g,"");
+  }
+  let n=Number(s);return Number.isFinite(n)?n:null;
+}
 function dateISO(s){let m=String(s).match(/(\d{1,2})[\/. -](\d{1,2})[\/. -](\d{2,4})/);if(!m)return"";let y=m[3].length==2?"20"+m[3]:m[3];return y+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")}
-function provider(lines){
-let labels=/^(proveedor|emisor|raz[oó]n\s*social\s*del\s*emisor)\s*:?[ ]*$/i;
-for(let i=0;i<lines.length;i++)if(labels.test(lines[i]))for(let j=i+1;j<i+5&&j<lines.length;j++){let x=lines[j].trim();if(x.length>3&&!/^(NIT|CUF|FACTURA|FECHA|DIRECCI|TEL|ACTIVIDAD|CLIENTE)/i.test(x))return x}
-let c=lines.slice(0,20).find(x=>/(IMPORTADORA|INDUSTRIA|COMERCIAL|S\.A\.|S\.R\.L\.|LTDA)/i.test(x));return c||""}
-function table(words){
-let rows=[];for(let w of words||[]){if(!w.text.trim())continue;let y=w.bbox.y0,r=rows.find(a=>Math.abs(a.y-y)<22);if(!r){r={y,items:[]};rows.push(r)}r.items.push(w)}
-rows.sort((a,b)=>a.y-b.y);let out=[];
-for(let r of rows){r.items.sort((a,b)=>a.bbox.x0-b.bbox.x0);let s=r.items.map(w=>w.text).join(" ").replace(/\s+/g," ").trim();
-let m=s.match(/^([A-Z0-9][A-Z0-9._-]{3,})\s+([\d.,]+)\s+(.+?)\s+(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/i);
-if(m)out.push({codigo:m[1],cantidad:num(m[2]),descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:num(m[5]),descuento:num(m[6]),subtotal:num(m[7])})}return out}
-function total(lines){let a=[];lines.forEach((x,i)=>{if(/^total\b/i.test(x)){let m=x.match(/([0-9][0-9.,]*)\s*$/);if(m)a.push(num(m[1]));if(lines[i+1]&&/^[0-9.,]+$/.test(lines[i+1]))a.push(num(lines[i+1]))}});return a.filter(x=>x!=null).at(-1)}
-async function cropImage(file, x, y, w, h){
-  return await new Promise((resolve,reject)=>{
-    const img=new Image();
-    const url=URL.createObjectURL(file);
-    img.onload=()=>{
-      const c=document.createElement("canvas");
-      c.width=Math.max(1,Math.round(img.naturalWidth*w));
-      c.height=Math.max(1,Math.round(img.naturalHeight*h));
-      c.getContext("2d").drawImage(img,
-        Math.round(img.naturalWidth*x),Math.round(img.naturalHeight*y),
-        Math.round(img.naturalWidth*w),Math.round(img.naturalHeight*h),
-        0,0,c.width,c.height);
-      URL.revokeObjectURL(url); resolve(c);
-    };
-    img.onerror=reject; img.src=url;
-  });
-}
-
+function cleanOCR(s){return String(s||"").replace(/[|¦]/g," ").replace(/[“”]/g,'"').replace(/[’‘]/g,"'").replace(/\s+/g," ").trim()}
 function providerFromHeader(txt){
-  const lines=txt.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
-  // In the tested invoice the issuer is in the upper-left logo/header:
-  // "Monterrey IMPORTADORA ... SOLUCIONES EN ACERO".
-  // Never use the "Nombre/Razón Social" line here because that is the customer.
-  let joined=lines.join(" ");
-  let m=joined.match(/(?:IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA|MONTERREY)[^\\n]{0,100}(?:S\.?R\.?L\.?|S\.?A\.?|LTDA\.?)/i);
-  if(m) return m[0].replace(/\s+/g," ").trim();
-  let c=lines.find(x=>/(IMPORTADORA|COMERCIAL|MONTERREY|SOLUCIONES EN ACERO)/i.test(x));
-  return c||"";
+ const lines=String(txt||"").split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);let joined=lines.join(" ");
+ let m=joined.match(/(?:MONTERREY|IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA)[^\n]{0,100}?(?:S\.?R\.?L\.?|S\.?A\.?|LTDA\.?|SOLUCIONES EN ACERO)/i);
+ if(m)return m[0].replace(/\s+/g," ").trim();return lines.find(x=>/(MONTERREY|IMPORTADORA|SOLUCIONES EN ACERO)/i.test(x))||"";
 }
-
-function productsFromTableText(txt){
-  const lines=txt.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
-  let out=[];
-  for(const s of lines){
-    let m=s.match(/([A-Z0-9][A-Z0-9._-]{3,})\s+([\d.,]+)\s+(.+?)\s+(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/i);
-    if(m){
-      out.push({codigo:m[1],cantidad:num(m[2]),descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:num(m[5]),descuento:num(m[6]),subtotal:num(m[7])});
-    }
-  }
-  return out;
+function parseProductCandidate(txt){
+ let s=cleanOCR(txt);
+ // Find code + quantity first. Then take the final three money-like values as
+ // price, discount and subtotal. This survives OCR turning "PZ" into "|".
+ let head=s.match(/([A-Z0-9][A-Z0-9._-]{3,})\s+(\d+(?:[.,]\d+)?)\s+/i);if(!head)return null;
+ let codigo=head[1],cantidad=num(head[2]),rest=s.slice(head.index+head[0].length);
+ let nums=[...rest.matchAll(/\d[\d.,]*/g)];if(nums.length<3)return null;
+ let tri=nums.slice(-3),precio=num(tri[0][0]),descuento=num(tri[1][0]),subtotal=num(tri[2][0]);
+ if(precio==null||descuento==null||subtotal==null)return null;
+ let before=rest.slice(0,tri[0].index).trim();
+ let unit="";let um=before.match(/(?:^|\s)(PZ|UN|UND|KG|M|MT|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV)\s*$/i);
+ if(um){unit=um[1].toUpperCase();before=before.slice(0,um.index).trim()}
+ before=before.replace(/^(?:Descripción|Und\.?|Prec\.?Unit|Descuento|SubTotal)\s+/i,"").trim();
+ // If OCR inserted table headers before the row, keep only text after the last header.
+ before=before.replace(/^.*?(?:Cod\.?\s*Prod\.?|Cantidad)\s+/i,"").trim();
+ if(!before||cantidad==null)return null;
+ return {codigo,cantidad,descripcion:before,unidad:unit||"PZ",precio,descuento,subtotal};
 }
-
+function productsFromWords(words){
+ if(!words||!words.length)return[];let rows=[];
+ for(const w of words){let t=String(w.text||"").trim();if(!t)continue;let y=w.bbox.y0,row=rows.find(r=>Math.abs(r.y-y)<28);if(!row){row={y,items:[]};rows.push(row)}row.items.push(w)}
+ rows.sort((a,b)=>a.y-b.y);for(const r of rows){r.items.sort((a,b)=>a.bbox.x0-b.bbox.x0);let p=parseProductCandidate(r.items.map(w=>w.text).join(" "));if(p)return[p]}return[];
+}
+function findTotal(lines){let vals=[];for(let i=0;i<lines.length;i++){if(/^TOTAL\s*(?:Bs)?/i.test(lines[i])){let m=lines[i].match(/([0-9][0-9.,]*)\s*$/);if(m)vals.push(num(m[1]));for(let j=1;j<=2;j++)if(lines[i+j]&&/^[0-9][0-9.,]*$/.test(lines[i+j]))vals.push(num(lines[i+j]))}}return vals.filter(v=>v!=null).at(-1)??null}
+async function cropImage(file,x,y,w,h){return await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.naturalWidth*w));c.height=Math.max(1,Math.round(img.naturalHeight*h));const ctx=c.getContext("2d");ctx.imageSmoothingEnabled=true;ctx.drawImage(img,Math.round(img.naturalWidth*x),Math.round(img.naturalHeight*y),Math.round(img.naturalWidth*w),Math.round(img.naturalHeight*h),0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c)};img.onerror=reject;img.src=url})}
 async function ocr(){
-  let f=$("photo").files[0];
-  if(!f){$("ocrmsg").textContent="Seleccione una fotografía.";return}
-  try{
-    $("ocrmsg").textContent="1/3 Analizando encabezado del emisor...";
-    $("prog").style.width="15%";
-
-    // Targeted zones for standard Bolivian invoice layout.
-    // Upper-left: issuer/logo. Central band: customer/date. Middle band: product table.
-    const headerCrop=await cropImage(f,0.00,0.00,0.48,0.24);
-    const tableCrop=await cropImage(f,0.02,0.29,0.96,0.24);
-
-    const headerOCR=await Tesseract.recognize(headerCrop,"spa+eng");
-    $("prog").style.width="35%";
-    const tableOCR=await Tesseract.recognize(tableCrop,"spa+eng");
-    $("prog").style.width="60%";
-
-    const full=await Tesseract.recognize(f,"spa+eng",{logger:m=>{
-      if(m.status==="recognizing text")$("prog").style.width=Math.max(60,Math.round(60+(m.progress||0)*40))+"%";
-    }});
-
-    const fullText=full.data.text;
-    const lines=fullText.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
-
-    // Supplier: use issuer header, not customer "Nombre/Razón Social".
-    let pv=providerFromHeader(headerOCR.data.text);
-    if(!pv){
-      pv=lines.find(x=>/(IMPORTADORA|MONTERREY|SOLUCIONES EN ACERO)/i.test(x))||"";
-    }
-    if(pv) $("prov").value=pv;
-
-    // Invoice number and date/time.
-    let fm=fullText.match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);
-    if(fm && !$("fact").value) $("fact").value=fm[1];
-    let dm=fullText.match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);
-    if(dm) $("fecha").value=dateISO(dm[1]);
-    let tm=fullText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
-    if(tm) $("hora").value=tm[0];
-
-    // Total: prefer TOTAL Bs in the full invoice.
-    let tt=total(lines);
-    if(tt!=null) $("importe").value=tt.toFixed(2);
-
-    // Product table: first use OCR text of the dedicated table crop,
-    // then word-coordinate reconstruction, then a tolerant text fallback.
-    products=productsFromTableText(tableOCR.data.text);
-    if(!products.length) products=table(full.data.words);
-    if(!products.length) products=productsFromTableText(fullText);
-
-    if(products.length) $("desc").value=products.map(x=>x.descripcion).join(" | ");
-    showProducts();
-
-    $("prog").style.width="100%";
-    $("ocrmsg").textContent=products.length
-      ? "Lectura terminada. Se detectó proveedor y "+products.length+" línea(s) de producto. Revise antes de guardar."
-      : "Proveedor procesado. La tabla de productos no fue reconocida; pruebe una foto más nítida y frontal.";
-  }catch(e){
-    $("ocrmsg").textContent="Error de lectura: "+e.message;
-  }
+ let f=$("photo").files[0];if(!f){$("ocrmsg").textContent="Seleccione una fotografía.";return}
+ try{
+  $("ocrmsg").textContent="1/4 Preparando lectura...";$("prog").style.width="10%";
+  const tableCrop=await cropImage(f,0.01,0.25,0.98,0.30),headerCrop=await cropImage(f,0,0,0.55,0.28);
+  $("ocrmsg").textContent="2/4 Leyendo cantidad, detalle, precio, descuento y subtotal...";$("prog").style.width="20%";
+  const tableOCR=await Tesseract.recognize(tableCrop,"spa+eng",{logger:m=>{if(m.status==="recognizing text")$("prog").style.width=Math.max(20,Math.round(20+(m.progress||0)*35))+"%";}});
+  $("prog").style.width="58%";const headerOCR=await Tesseract.recognize(headerCrop,"spa+eng");$("prog").style.width="68%";const full=await Tesseract.recognize(f,"spa+eng");
+  const fullText=full.data.text,lines=fullText.split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+  let pv=providerFromHeader(headerOCR.data.text);if(pv)$("prov").value=pv;
+  let fm=fullText.match(/FACTURA\s*(?:N[°ºo]\.?\s*)?[:#]?\s*(\d+)/i);if(fm&&!$("fact").value)$("fact").value=fm[1];
+  let dm=fullText.match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i);if(dm)$("fecha").value=dateISO(dm[1]);
+  let tm=fullText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);if(tm)$("hora").value=tm[0];
+  let tt=findTotal(lines);if(tt!=null)$("importe").value=tt.toFixed(2);
+  let p=parseProductCandidate(tableOCR.data.text)||parseProductCandidate(fullText)||productsFromWords(full.data.words)[0]||null;
+  if(p){products=[p];$("pcodigo").value=p.codigo;$("pcantidad").value=p.cantidad;$("punidad").value=p.unidad;$("pprecio").value=p.precio.toFixed(2);$("pdescuento").value=p.descuento.toFixed(2);$("psubtotal").value=p.subtotal.toFixed(2);$("desc").value=p.descripcion;$("importe").value=p.subtotal.toFixed(2);updateCalc();showProducts();$("ocrmsg").textContent="Lectura terminada. Cantidad, detalle, precio, descuento y subtotal detectados. Revise antes de guardar."}
+  else{$("ocrmsg").textContent="No se pudo identificar la línea de producto. Pruebe una foto frontal, completa y nítida.";products=[];showProducts()}
+  $("prog").style.width="100%";
+ }catch(e){$("ocrmsg").textContent="Error de lectura: "+e.message}
 }
+function updateCalc(){let q=num($("pcantidad").value),pr=num($("pprecio").value),d=num($("pdescuento").value)||0,sub=num($("psubtotal").value);if(q!=null&&pr!=null){let calc=q*pr-d;$("calcmsg").textContent="Calculado: Bs "+calc.toFixed(2)+(sub!=null?" · Subtotal factura: Bs "+sub.toFixed(2)+" · Diferencia: Bs "+(calc-sub).toFixed(2):"")}}
 function showProducts(){$("products").innerHTML=products.map(p=>"<tr><td>"+p.codigo+"</td><td>"+p.descripcion+"</td><td>"+p.cantidad+"</td><td>"+p.unidad+"</td><td>"+money(p.precio)+"</td><td>"+money(p.descuento)+"</td><td>"+money(p.subtotal)+"</td></tr>").join("")||"<tr><td colspan=7>No se detectaron productos; pruebe una foto más nítida.</td></tr>"}
-$("form").onsubmit=e=>{e.preventDefault();let p={rend:Number($("rend").value),fact:$("fact").value,nit:$("nit").value,cuf:$("cuf").value,prov:$("prov").value,fecha:$("fecha").value,hora:$("hora").value,total:Number($("importe").value),cat:$("cat").value,desc:$("desc").value,products};if(db.p.some(x=>x.fact==p.fact&&x.nit==p.nit)){alert("Posible factura duplicada.");return}db.p.push(p);save();alert("Compra guardada.");clearForm();tab("inicio",document.querySelector("nav button"))}
-function clearForm(){$("form").reset();$("rend").value=String(db.rend.at(-1).id).padStart(3,"0");products=[];showProducts()}
+["pcantidad","pprecio","pdescuento","psubtotal"].forEach(id=>$(id).addEventListener("input",updateCalc));
+$("form").onsubmit=e=>{e.preventDefault();let p0={codigo:$("pcodigo").value,cantidad:num($("pcantidad").value),descripcion:$("desc").value,unidad:$("punidad").value,precio:num($("pprecio").value),descuento:num($("pdescuento").value)||0,subtotal:num($("psubtotal").value)};if(!p0.descripcion||p0.cantidad==null||p0.precio==null||p0.subtotal==null){alert("Faltan datos del producto: cantidad, descripción, precio o subtotal.");return}products=[p0];let p={rend:Number($("rend").value),fact:$("fact").value,nit:$("nit").value,cuf:$("cuf").value,prov:$("prov").value,fecha:$("fecha").value,hora:$("hora").value,total:Number($("importe").value),cat:$("cat").value,desc:$("desc").value,products};if(db.p.some(x=>x.fact==p.fact&&x.nit==p.nit)){alert("Posible factura duplicada.");return}db.p.push(p);save();alert("Compra guardada.");clearForm();tab("inicio",document.querySelector("nav button"))}
+function clearForm(){$("form").reset();$("rend").value=String(db.rend.at(-1).id).padStart(3,"0");products=[];showProducts();$("calcmsg").textContent="El sistema comprobará: cantidad × precio − descuento = subtotal."}
 function newRend(){db.rend.push({id:Math.max(...db.rend.map(x=>x.id))+1,date:new Date().toISOString().slice(0,10)});save()}
 render();clearForm()
 </script>
