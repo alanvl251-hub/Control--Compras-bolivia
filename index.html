@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>Control de Compras y Rendiciones — v12</h1><small>PDF estructurado primero · cabecera del PDF para proveedor/NIT · QR para identificación</small></header>
+<header><h1>Control de Compras y Rendiciones — v14</h1><small>PDF estructurado primero · cabecera del PDF para proveedor/NIT · múltiples formatos · QR para identificación</small></header>
 <nav><button class="active" onclick="tab('inicio',this)">Inicio</button><button onclick="tab('registrar',this)">Registrar compra</button><button onclick="tab('rendiciones',this)">Rendiciones</button><button onclick="tab('compras',this)">Compras</button></nav>
 <main>
 <section id="inicio" class="tab active"><div class="card"><h2>Resumen</h2><p>Total: <b id="total">Bs 0,00</b> · Facturas: <b id="count">0</b> · Rendiciones: <b id="rcount">1</b></p><div id="alert"></div></div><div class="card"><h3>Últimas compras</h3><div class="table"><table><tbody id="last"></tbody></table></div></div></section>
@@ -27,7 +27,7 @@
 <section id="compras" class="tab"><div class="card"><h2>Compras registradas</h2><input id="search" oninput="render()" placeholder="Buscar"><div class="table"><table><tbody id="purchases"></tbody></table></div></div></section>
 </main>
 <script>
-const K='compras_bolivia_v12';let db=JSON.parse(localStorage.getItem(K)||'null')||{cash:7000,warn:60,limit:70,rend:[{id:1,date:new Date().toISOString().slice(0,10)}],p:[]};let qrScanner=null,products=[];const $=id=>document.getElementById(id);const UNITS=['PZ','UN','UND','KG','G','M','MT','CM','MM','L','LT','CJ','PAR','GL','BOL','ROL','JGO','HR','SERV','M2','M3'];
+const K='compras_bolivia_v14';let db=JSON.parse(localStorage.getItem(K)||'null')||{cash:7000,warn:60,limit:70,rend:[{id:1,date:new Date().toISOString().slice(0,10)}],p:[]};let qrScanner=null,products=[];const $=id=>document.getElementById(id);const UNITS=['PZ','UN','UND','KG','G','M','MT','CM','MM','L','LT','CJ','PAR','GL','BOL','ROL','JGO','HR','SERV','M2','M3'];
 function save(){localStorage.setItem(K,JSON.stringify(db));render()}function money(n){return 'Bs '+Number(n||0).toLocaleString('es-BO',{minimumFractionDigits:2})}function tab(id,b){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
 function render(){let t=db.p.reduce((s,x)=>s+Number(x.total||0),0),pc=t/db.cash*100;$('total').textContent=money(t);$('count').textContent=db.p.length;$('rcount').textContent=db.rend.length;$('alert').textContent=pc>=db.limit?'Límite de caja alcanzado':pc>=db.warn?'Alerta preventiva: '+pc.toFixed(1)+'% consumido':'Caja dentro del nivel previsto';$('rend').value=String(db.rend.at(-1).id).padStart(3,'0');$('last').innerHTML=db.p.slice(-10).reverse().map(x=>'<tr><td>'+x.fact+'</td><td>'+x.prov+'</td><td>'+money(x.total)+'</td></tr>').join('')||'<tr><td>Sin compras</td></tr>';$('purchases').innerHTML=db.p.map(x=>'<tr><td>'+x.fact+'</td><td>'+x.prov+'</td><td>'+x.nit+'</td><td>'+money(x.total)+'</td></tr>').join('')||'<tr><td>Sin compras</td></tr>';$('rends').innerHTML=db.rend.map(x=>'<tr><td>Rendición '+String(x.id).padStart(3,'0')+'</td><td>'+x.date+'</td></tr>').join('')}
 function parseQR(){let s=$('qr').value.trim();try{let u=new URL(s);$('nit').value=u.searchParams.get('nit')||'';$('cuf').value=u.searchParams.get('cuf')||'';$('fact').value=u.searchParams.get('numero')||'';$('qrmsg').textContent='QR identificado. NIT, CUF y número de factura obtenidos.'}catch(e){$('qrmsg').textContent='QR no reconocido como URL SIAT.'}}
@@ -37,27 +37,43 @@ function normalizeText(s){return String(s||'').replace(/\u00a0/g,' ').replace(/[
 function dateISO(s){let m=String(s||'').match(/(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})/);if(!m)return '';let y=m[3].length===2?'20'+m[3]:m[3];return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')}
 function parseMoneyToken(s){let m=String(s).match(/[0-9][0-9.,]*/);return m?num(m[0]):null}
 function findTotalText(txt){let lines=String(txt).split(/\r?\n/).map(normalizeText).filter(Boolean);for(let i=0;i<lines.length;i++){if(/^TOTAL\s*(?:Bs)?$/i.test(lines[i])||/^TOTAL\s+Bs/i.test(lines[i])){for(let j=i;j<=i+3&&j<lines.length;j++){let n=parseMoneyToken(lines[j]);if(n!=null)return n}}}let m=String(txt).match(/TOTAL\s+Bs\s*[:]?\s*([0-9][0-9.,]*)/i);return m?num(m[1]):null}
-function extractSupplierNIT(txt){let lines=String(txt).split(/\r?\n/).map(normalizeText).filter(Boolean);for(let line of lines){let m=line.match(/^NIT\s*[:\-]?\s*(\d{7,15})$/i);if(m)return m[1]}let m=String(txt).match(/(?:^|\n)\s*NIT\s+([0-9]{7,15})\b/i);return m?m[1]:''}
-function cleanSupplierOCR(raw){let raw0=normalizeText(String(raw||'').replace(/\n+/g,' '));let lines=String(raw||'').split(/\r?\n/).map(normalizeText).filter(Boolean);lines=lines.filter(x=>!/^Sucursal\b|^Nro\.? Punto|^4to Anillo|^Tel[eé]fono|^SANTA CRUZ|^NIT\b|^FACTURA|^CUF|^ACTIVIDAD/i.test(x));let kept=[];for(let l of lines){if(/IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA|S\.?R\.?L\.?|S\.?A\.?|LTDA|SOLUCIONES|ACERO|MONTERREY|ONTERR/i.test(l))kept.push(l)}if(!kept.length)return '';let joined=kept.join(' ').replace(/\s+/g,' ').trim();
- // Correcciones conservadoras para logotipos frecuentes: el OCR puede perder la primera letra o los puntos de S.R.L.
+function extractSupplierNIT(txt){
+ let t=String(txt||'');
+ // The PDF text extractor may place the issuer name, NIT label and number
+ // on the same visual row. Prefer the first standalone NIT occurrence.
+ let m=t.match(/(?:^|[\s])NIT\s*[:\-]?\s*(\d{7,15})\b/i);
+ if(m)return m[1];
+ return '';
+}
+function cleanSupplierOCR(raw){
+ let lines=String(raw||'').split(/\r?\n/).map(normalizeText).filter(Boolean);
+ const bad=/^(CASA\s+MATRIZ|SUCURSAL|NO\.?\s*PUNTO|N(?:RO\.?|°|º)\s*PUNTO|CALLE\b|AV\.?\b|ZONA\b|SANTA\s+CRUZ|LA\s+PAZ|COCHABAMBA|NIT\b|FACTURA\b|CUF\b|FECHA\b|NOMBRE\/?RAZ[ÓO]N\s+SOCIAL|C[ÓO]D\.?\s*AUTORIZACI[ÓO]N)/i;
+ let good=lines.filter(x=>!bad.test(x)&&/[A-Za-zÁÉÍÓÚÜÑ]{3,}/.test(x));
+ // Prefer the first issuer-like line, before address/NIT information.
+ if(good.length){
+   let x=good[0].replace(/\bNIT\s*[:\-]?\s*\d{7,15}\b.*$/i,'').trim();
+   if(x.length>=5)return x;
+ }
+ let kept=lines.filter(x=>/IMPORTADORA|COMERCIAL|INDUSTRIA|EMPRESA|SERVICIOS|SOLUCIONES|ACERO|MONTERREY|RUIZ|DORADO/i.test(x)&&!bad.test(x));
+ if(!kept.length)return '';
+ let joined=kept.join(' ').replace(/\s+/g,' ').trim();
  if(/IMPORTADORA/i.test(joined)&&/SOLUCIONES\s+EN\s+ACERO/i.test(joined)){
    let prefix=/MONTERREY|ONTERR/i.test(joined)?'MONTERREY ':'';
    return (prefix+'IMPORTADORA S.R.L. SOLUCIONES EN ACERO').trim();
  }
- joined=joined.replace(/\bONTERR(?:EY)?\b/ig,'MONTERREY').replace(/\bSERI\b/ig,'S.R.L.');joined=joined.replace(/^[^A-Za-zÁÉÍÓÚÜÑ]+/,'').replace(/[^A-Za-zÁÉÍÓÚÜÑ0-9.\- ]+$/,'').trim();return joined}
+ return joined.replace(/^[^A-Za-zÁÉÍÓÚÜÑ]+/,'').replace(/[^A-Za-zÁÉÍÓÚÜÑ0-9.\- ]+$/,'').trim();
+}
 function extractProvider(txt){
  let lines=String(txt).split(/\r?\n/).map(normalizeText).filter(Boolean);
- let idx=lines.findIndex(x=>/Nombre\/Razón Social/i.test(x));
- let top=idx>0?lines.slice(0,idx):lines.slice(0,16);
- top=top.filter(x=>!/^NIT\b|^FACTURA\b|^CUF\b|^Sucursal\b|^Fecha\b|^Nro\.? Punto|^No\. Punto|^CALLE\b|^ZONA\b|^SANTA CRUZ\b|^LA PAZ\b|^COCHABAMBA\b/i.test(x));
- let candidate=top.find(x=>/(S\.?R\.?L\.?|S\.?A\.?|LTDA|IMPORTADORA|COMERCIAL|EMPRESA|SOLUCIONES|SERVICIOS|RUIZ|DORADO)/i.test(x));
- if(candidate)return candidate;
- // Many one-person businesses have no S.R.L./S.A. suffix. In a fiscal PDF,
- // the issuer is normally the first meaningful line before the address/NIT.
- for(let x of top){
-   if(x.length>=5 && /[A-Za-zÁÉÍÓÚÜÑ]/.test(x) && !/^RUC\b|^COD\.?/i.test(x)) return x;
+ // First visual row often contains issuer + NIT. Extract the issuer text before NIT.
+ for(let line of lines.slice(0,12)){
+   let m=line.match(/^(.+?)\s+NIT\s*[:\-]?\s*\d{7,15}\b/i);
+   if(m){let x=m[1].trim();if(x&&!/^(CASA\s+MATRIZ|SUCURSAL)$/i.test(x))return x;}
  }
- return '';
+ const bad=/^(CASA\s+MATRIZ|SUCURSAL|NO\.?\s*PUNTO|N(?:RO\.?|°|º)\s*PUNTO|CALLE\b|AV\.?\b|ZONA\b|SANTA\s+CRUZ|LA\s+PAZ|COCHABAMBA|NIT\b|FACTURA\b|CUF\b|FECHA\b|NOMBRE\/?RAZ[ÓO]N\s+SOCIAL|C[ÓO]D\.?\s*AUTORIZACI[ÓO]N)/i;
+ let top=lines.slice(0,20).filter(x=>!bad.test(x)&&/[A-Za-zÁÉÍÓÚÜÑ]/.test(x));
+ let candidate=top.find(x=>/(IMPORTADORA|COMERCIAL|EMPRESA|INDUSTRIA|SERVICIOS|SOLUCIONES|ACERO|RUIZ|DORADO|S\.R\.L\.|S\.A\.|LTDA)/i.test(x)&&!(/^[A-F0-9\s]{20,}$/i.test(x)));
+ return candidate||'';
 }
 async function ocrPDFHeader(file){let pdfjs=await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs');pdfjs.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';let buf=await file.arrayBuffer();let pdf=await pdfjs.getDocument({data:buf}).promise;let page=await pdf.getPage(1);let viewport=page.getViewport({scale:2.2});let canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);let ctx=canvas.getContext('2d');await page.render({canvasContext:ctx,viewport}).promise;let crop=document.createElement('canvas');crop.width=Math.floor(canvas.width*0.46);crop.height=Math.floor(canvas.height*0.20);crop.getContext('2d').drawImage(canvas,0,0,crop.width,crop.height,0,0,crop.width,crop.height);let r=await Tesseract.recognize(crop,'spa+eng',{config:{tessedit_pageseg_mode:'11'}});return r.data.text||''}
 
@@ -66,8 +82,10 @@ function findHeaderIndex(lines){
  let i=lines.findIndex(x=>/Cod\.?\s*Prod\.?/i.test(x)&&/Cantidad/i.test(x)&&/SubTotal/i.test(x));
  if(i>=0)return i;
  i=lines.findIndex(x=>/^C[ÓO]DIGO$/i.test(x));
- if(i>=0){for(let j=i;j<Math.min(lines.length,i+10);j++){if(/SUBTOTAL/i.test(lines[j]))return i}}
+ if(i>=0)return i;
  i=lines.findIndex(x=>/PRODUCTO\s*\/\s*SERVICIO/i.test(x));
+ if(i>=0)return i;
+ i=lines.findIndex(x=>/CANTIDAD.*UNIDAD.*DESCRIPCI[ÓO]N/i.test(x));
  return i;
 }
 function isUnit(x){return UNITS.includes(String(x||'').toUpperCase()) || /^(UNIDAD|UNIDADES|SERVICIOS?|SERVICIO)$/i.test(String(x||''))}
@@ -111,22 +129,49 @@ function parseWrappedProduct(lines,start){
    if(part)descParts.push(part);
  }
  if(tailIndex<0)return null;
- let desc=descParts.join(' ').replace(/\s+/g,' ').trim();
+ let desc=descParts.join(' ').replace(/\s+/g,' ').trim(); desc=desc.replace(/^\((?:servicios?|productos?)\)\s*/i,'').replace(/^(SERVICIOS?)\s+(SERVICIOS?\s+DE\s+)/i,'$2');
  if(!desc)return null;
  return {codigo,cantidad:q,descripcion:desc,unidad,precio:tail.price,descuento:tail.disc,subtotal:tail.sub,source:'PDF'};
 }
+function parseCompactProductLine(lines,i){
+ let line=normalizeText(lines[i]);
+ // Layout used by some PDFs: code + quantity + description + price + discount + subtotal,
+ // while the unit is printed on a separate visual row immediately before the product.
+ let m=line.match(/^([A-Za-z0-9][A-Za-z0-9._\/-]{0,})\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)$/i);
+ if(!m)return null;
+ let q=num(m[2]),price=num(m[4]),disc=num(m[5])||0,sub=num(m[6]);
+ if(!(q>0&&price>=0&&sub>=0))return null;
+ let calc=+(q*price-disc).toFixed(2);if(Math.abs(calc-sub)>0.02)return null;
+ let unidad='';
+ for(let j=i-1;j>=Math.max(0,i-4);j--){let x=normalizeText(lines[j]);if(/^(UNIDAD|UNIDADES|PZ|UN|UND|KG|G|M|MT|CM|MM|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|M2|M3)$/i.test(x)){unidad=x.toUpperCase();break}}
+ let desc=m[3].trim();
+ // If the immediately preceding meaningful line is a service/product descriptor,
+ // prepend it (e.g. SERVICIOS + DE ALIMENTACION).
+ for(let j=i-1;j>=Math.max(0,i-3);j--){let x=normalizeText(lines[j]);if(!x)continue;if(/^(SERVICIO|SERVICIOS|PRODUCTO|PRODUCTOS)$/i.test(x)){desc=x+' '+desc;break}}
+ desc=desc.replace(/^\((?:servicios?|productos?)\)\s*/i,'').replace(/\s+/g,' ').trim();
+ return {codigo:m[1],cantidad:q,descripcion:desc,unidad,precio:price,descuento:disc,subtotal:sub,source:'PDF'};
+}
+
 function parseProductsFromPDF(text){
  let lines=String(text).split(/\r?\n/).map(normalizeText).filter(Boolean);
  let hi=findHeaderIndex(lines);if(hi<0)return [];
  let out=[];
- for(let i=hi+1;i<Math.min(lines.length,hi+80);i++){
-   if(/^SUBTOTAL\b/i.test(lines[i]))break;
-   let p=parseProductLine(lines[i]);
-   if(p){out.push(p);continue}
+ // Do not stop at the header word SUBTOTAL. Some invoices place the
+ // column heading SUBTOTAL on its own line before the actual products.
+ // First scan a generous window after the header and stop only after a
+ // real product has been found and a totals section begins.
+ let started=false;
+ for(let i=hi+1;i<Math.min(lines.length,hi+100);i++){
+   let line=lines[i];
+   let p=parseProductLine(line);
+   if(p){out.push(p);started=true;continue}
    p=parseWrappedProduct(lines,i);
-   if(p){out.push(p);}
+   if(p){out.push(p);started=true;continue}
+   p=parseCompactProductLine(lines,i);
+   if(p){out.push(p);started=true;continue}
+   if(started && /^(SUBTOTAL|DESCUENTO|TOTAL|MONTO A PAGAR|IMPORTE BASE)/i.test(line)) break;
  }
- return out.filter((p,i,a)=>i===a.findIndex(x=>x.codigo===p.codigo&&x.subtotal===p.subtotal));
+ return out.filter((p,i,a)=>i===a.findIndex(x=>x.codigo===p.codigo&&Math.abs(x.subtotal-p.subtotal)<0.01));
 }
 function applyDocument(text,source){
  let total=findTotalText(text);if(total!=null)$('importe').value=total.toFixed(2);let f=extractInvoice(text);if(f)$('fact').value=f;let prov=extractProvider(text);if(prov)$('prov').value=prov;let dm=String(text).match(/Fecha\s*[:\-]?\s*(\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]\d{2,4})/i);if(dm)$('fecha').value=dateISO(dm[1]);let tm=String(text).match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);if(tm)$('hora').value=tm[0];let ps=parseProductsFromPDF(text);products=ps;showProducts();if(ps.length){let p=ps[0];$('pcodigo').value=p.codigo;$('pcantidad').value=p.cantidad;$('desc').value=p.descripcion;$('punidad').value=p.unidad;$('pprecio').value=p.precio.toFixed(2);$('pdescuento').value=p.descuento.toFixed(2);$('psubtotal').value=p.subtotal.toFixed(2);updateCalc();let diff=Math.abs((total??p.subtotal)-p.subtotal);$('pdfmsg').className=diff<0.02?'ok':'warn';$('pdfmsg').textContent=diff<0.02?'✓ PDF leído y línea validada. Los datos provienen del texto del documento, no de OCR.':'⚠ Línea detectada, pero revisar subtotal vs total.';return true} $('pdfmsg').className='bad';$('pdfmsg').textContent='No se encontró una línea de producto estructurada en el PDF. No se rellenaron números por aproximación.';return false;
