@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#17365d"><title>Control de Compras Bolivia v11</title>
+<meta name="theme-color" content="#17365d"><title>Control de Compras Bolivia v13</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
@@ -45,24 +45,87 @@ function cleanSupplierOCR(raw){let raw0=normalizeText(String(raw||'').replace(/\
    return (prefix+'IMPORTADORA S.R.L. SOLUCIONES EN ACERO').trim();
  }
  joined=joined.replace(/\bONTERR(?:EY)?\b/ig,'MONTERREY').replace(/\bSERI\b/ig,'S.R.L.');joined=joined.replace(/^[^A-Za-zÁÉÍÓÚÜÑ]+/,'').replace(/[^A-Za-zÁÉÍÓÚÜÑ0-9.\- ]+$/,'').trim();return joined}
-function extractProvider(txt){let lines=String(txt).split(/\r?\n/).map(normalizeText).filter(Boolean);let idx=lines.findIndex(x=>/Nombre\/Razón Social/i.test(x));let top=idx>0?lines.slice(0,idx):lines.slice(0,16);top=top.filter(x=>!/^NIT\b|^FACTURA\b|^CUF\b|^Sucursal\b|^Fecha\b|^Nro\.? Punto/i.test(x));let candidate=top.find(x=>/(S\.?R\.?L\.?|S\.?A\.?|LTDA|IMPORTADORA|COMERCIAL|EMPRESA|SOLUCIONES)/i.test(x));return candidate||''}
+function extractProvider(txt){
+ let lines=String(txt).split(/\r?\n/).map(normalizeText).filter(Boolean);
+ let idx=lines.findIndex(x=>/Nombre\/Razón Social/i.test(x));
+ let top=idx>0?lines.slice(0,idx):lines.slice(0,16);
+ top=top.filter(x=>!/^NIT\b|^FACTURA\b|^CUF\b|^Sucursal\b|^Fecha\b|^Nro\.? Punto|^No\. Punto|^CALLE\b|^ZONA\b|^SANTA CRUZ\b|^LA PAZ\b|^COCHABAMBA\b/i.test(x));
+ let candidate=top.find(x=>/(S\.?R\.?L\.?|S\.?A\.?|LTDA|IMPORTADORA|COMERCIAL|EMPRESA|SOLUCIONES|SERVICIOS|RUIZ|DORADO)/i.test(x));
+ if(candidate)return candidate;
+ // Many one-person businesses have no S.R.L./S.A. suffix. In a fiscal PDF,
+ // the issuer is normally the first meaningful line before the address/NIT.
+ for(let x of top){
+   if(x.length>=5 && /[A-Za-zÁÉÍÓÚÜÑ]/.test(x) && !/^RUC\b|^COD\.?/i.test(x)) return x;
+ }
+ return '';
+}
 async function ocrPDFHeader(file){let pdfjs=await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs');pdfjs.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';let buf=await file.arrayBuffer();let pdf=await pdfjs.getDocument({data:buf}).promise;let page=await pdf.getPage(1);let viewport=page.getViewport({scale:2.2});let canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);let ctx=canvas.getContext('2d');await page.render({canvasContext:ctx,viewport}).promise;let crop=document.createElement('canvas');crop.width=Math.floor(canvas.width*0.46);crop.height=Math.floor(canvas.height*0.20);crop.getContext('2d').drawImage(canvas,0,0,crop.width,crop.height,0,0,crop.width,crop.height);let r=await Tesseract.recognize(crop,'spa+eng',{config:{tessedit_pageseg_mode:'11'}});return r.data.text||''}
 
 function extractInvoice(txt){let m=String(txt).match(/(?:^|\n)\s*(?:FACTURA\s*N[º°o]?\.?\s*|FACTURA\s+)(\d{2,})/i);return m?m[1]:''}
-function findHeaderIndex(lines){return lines.findIndex(x=>/Cod\.?\s*Prod\.?\s+Cantidad/i.test(x)&&/Descrip/i.test(x)&&/SubTotal/i.test(x))}
-function isUnit(x){return UNITS.includes(String(x||'').toUpperCase())}
+function findHeaderIndex(lines){
+ let i=lines.findIndex(x=>/Cod\.?\s*Prod\.?/i.test(x)&&/Cantidad/i.test(x)&&/SubTotal/i.test(x));
+ if(i>=0)return i;
+ i=lines.findIndex(x=>/^C[ÓO]DIGO$/i.test(x));
+ if(i>=0){for(let j=i;j<Math.min(lines.length,i+10);j++){if(/SUBTOTAL/i.test(lines[j]))return i}}
+ i=lines.findIndex(x=>/PRODUCTO\s*\/\s*SERVICIO/i.test(x));
+ return i;
+}
+function isUnit(x){return UNITS.includes(String(x||'').toUpperCase()) || /^(UNIDAD|UNIDADES|SERVICIOS?|SERVICIO)$/i.test(String(x||''))}
 function parseProductLine(line){
  line=normalizeText(line);if(!line)return null;
- // Expected sequence after the product header: code quantity description unit price discount subtotal.
- // Description may contain spaces, punctuation, fractions and quotes.
- let m=line.match(/^([A-Za-z0-9][A-Za-z0-9._\/-]{2,})\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+(PZ|UN|UND|KG|G|M|MT|CM|MM|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV|M2|M3)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)$/i);
- if(!m)return null;let q=num(m[2]),price=num(m[5]),disc=num(m[6])||0,sub=num(m[7]);if(!(q>0&&price>=0&&sub>=0))return null;let calc=+(q*price-disc).toFixed(2);if(Math.abs(calc-sub)>0.02)return null;return {codigo:m[1],cantidad:q,descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:price,descuento:disc,subtotal:sub,source:'PDF'};
+ let m=line.match(/^([A-Za-z0-9][A-Za-z0-9._\/-]{0,})\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+(PZ|UN|UND|KG|G|M|MT|CM|MM|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV|M2|M3|UNIDAD|UNIDADES)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)$/i);
+ if(!m)return null;
+ let q=num(m[2]),price=num(m[5]),disc=num(m[6])||0,sub=num(m[7]);
+ if(!(q>0&&price>=0&&sub>=0))return null;
+ let calc=+(q*price-disc).toFixed(2);
+ if(Math.abs(calc-sub)>0.02)return null;
+ return {codigo:m[1],cantidad:q,descripcion:m[3].trim(),unidad:m[4].toUpperCase(),precio:price,descuento:disc,subtotal:sub,source:'PDF'};
+}
+function parseWrappedProduct(lines,start){
+ // Handles PDFs that split a product across several lines, e.g.
+ // A-1 1.00 Unidad / (Servicios) / SERVICIOS / DE ALIMENTACION 9,675.00 0.00 9,675.00
+ let first=normalizeText(lines[start]);
+ let m=first.match(/^([A-Za-z0-9][A-Za-z0-9._\/-]{0,})\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+)$/);
+ if(!m)return null;
+ let codigo=m[1], q=num(m[2]), rest=m[3].trim();
+ if(!(q>0) || !isUnit(rest.split(/\s+/)[0])) return null;
+ let unitMatch=rest.match(/^(UNIDAD(?:ES)?|PZ|UN|UND|KG|G|M|MT|CM|MM|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV(?:ICIOS?)?|M2|M3)\b/i);
+ if(!unitMatch)return null;
+ let unidad=unitMatch[1].toUpperCase();
+ let descParts=[];
+ let tailIndex=-1, tail=null;
+ for(let j=start;j<Math.min(lines.length,start+12);j++){
+   let s=normalizeText(lines[j]);
+   let tm=s.match(/([0-9][0-9.,]*)\s+([0-9][0-9.,]*)\s+([0-9][0-9.,]*)\s*$/);
+   if(tm){
+     let price=num(tm[1]), disc=num(tm[2]), sub=num(tm[3]);
+     let calc=+(q*price-disc).toFixed(2);
+     if(price>=0&&disc>=0&&sub>=0&&Math.abs(calc-sub)<=0.02){
+       let prefix=s.slice(0,tm.index).trim();
+       if(prefix)descParts.push(prefix);
+       tailIndex=j;tail={price,disc,sub};break;
+     }
+   }
+   let part=s.replace(/^(UNIDAD(?:ES)?|PZ|UN|UND|KG|G|M|MT|CM|MM|L|LT|CJ|PAR|GL|BOL|ROL|JGO|HR|SERV(?:ICIOS?)?|M2|M3)\b/i,'').trim();
+   if(j===start) part='';
+   if(part)descParts.push(part);
+ }
+ if(tailIndex<0)return null;
+ let desc=descParts.join(' ').replace(/\s+/g,' ').trim();
+ if(!desc)return null;
+ return {codigo,cantidad:q,descripcion:desc,unidad,precio:tail.price,descuento:tail.disc,subtotal:tail.sub,source:'PDF'};
 }
 function parseProductsFromPDF(text){
- let lines=String(text).split(/\r?\n/).map(normalizeText).filter(Boolean);let hi=findHeaderIndex(lines);if(hi<0)return [];
- let out=[];for(let i=hi+1;i<lines.length;i++){if(/^SUBTOTAL\b/i.test(lines[i]))break;let p=parseProductLine(lines[i]);if(p)out.push(p)}
- // If PDF extraction wrapped a product description, join a short run of lines until the numeric tail appears.
- if(!out){out=[]} for(let i=hi+1;i<Math.min(lines.length,hi+20);i++){let joined=lines.slice(i,i+3).join(' ');let p=parseProductLine(joined);if(p){out.push(p);i+=2}}
+ let lines=String(text).split(/\r?\n/).map(normalizeText).filter(Boolean);
+ let hi=findHeaderIndex(lines);if(hi<0)return [];
+ let out=[];
+ for(let i=hi+1;i<Math.min(lines.length,hi+80);i++){
+   if(/^SUBTOTAL\b/i.test(lines[i]))break;
+   let p=parseProductLine(lines[i]);
+   if(p){out.push(p);continue}
+   p=parseWrappedProduct(lines,i);
+   if(p){out.push(p);}
+ }
  return out.filter((p,i,a)=>i===a.findIndex(x=>x.codigo===p.codigo&&x.subtotal===p.subtotal));
 }
 function applyDocument(text,source){
